@@ -8,6 +8,10 @@ on:
     branches:
       - main
 
+permissions:
+  contents: write    # ✅ REQUIRED so the workflow can push files
+  packages: write
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -15,6 +19,8 @@ jobs:
     steps:
       - name: Checkout your repo
         uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Clone source repository
         run: |
@@ -30,7 +36,12 @@ jobs:
           else
             diff="new"
           fi
-          echo "changed=$([[ -n "$diff" ]] && echo true || echo false)" >> $GITHUB_OUTPUT
+
+          if [[ -n "$diff" ]]; then
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Build Docker image
         if: steps.compare.outputs.changed == 'true'
@@ -48,8 +59,12 @@ jobs:
         if: steps.compare.outputs.changed == 'true'
         run: |
           mv latest_source_commit.txt last_built_commit.txt
-          git config user.name "github-actions"
-          git config user.email "actions@github.com"
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
           git add last_built_commit.txt
-          git commit -m "Update last built commit"
-          git push
+
+          # ✅ Avoid failing if nothing changed
+          git commit -m "Update last built commit" || echo "No changes to commit"
+
+          # ✅ Use GITHUB_TOKEN to push
+          git push origin HEAD:main
