@@ -36,4 +36,4 @@ EXPOSE 8119 8993
 USER nntp-proxy
 
 # Default entrypoint
-ENTRYPOINT ["/usr/local/bin/nntp-proxy", "--config", "/etc/nntp-proxy/config.yaml", "--port", "8119"]
+ENTRYPOINT ["/usr/local/bin/nntp-proxy", "--routing-mode", "standard", "--config", "/etc/nntp-proxy/config.yaml", "--port", "8119"]
