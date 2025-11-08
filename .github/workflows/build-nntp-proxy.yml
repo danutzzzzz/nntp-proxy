@@ -1,0 +1,55 @@
+name: Build & Update nntp-proxy Docker Image
+
+on:
+  schedule:
+    - cron: "0 3 * * *"  # Runs daily at 3 AM UTC
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout your repo
+        uses: actions/checkout@v4
+
+      - name: Clone source repository
+        run: |
+          git clone https://github.com/mjc/nntp-proxy.git source-repo
+          cd source-repo
+          git log -1 --pretty=format:"%H" > ../latest_source_commit.txt
+
+      - name: Compare last build commit
+        id: compare
+        run: |
+          if [ -f last_built_commit.txt ]; then
+            diff=$(diff last_built_commit.txt latest_source_commit.txt || true)
+          else
+            diff="new"
+          fi
+          echo "changed=$([[ -n "$diff" ]] && echo true || echo false)" >> $GITHUB_OUTPUT
+
+      - name: Build Docker image
+        if: steps.compare.outputs.changed == 'true'
+        run: |
+          docker build -t danutzzzzz/nntp-proxy:latest .
+          echo "✅ Docker image built"
+
+      - name: Push Docker image to Docker Hub
+        if: steps.compare.outputs.changed == 'true'
+        run: |
+          echo "${{ secrets.DOCKER_HUB_TOKEN }}" | docker login -u "${{ secrets.DOCKER_HUB_USERNAME }}" --password-stdin
+          docker push your-dockerhub-username/nntp-proxy:latest
+
+      - name: Update last built commit record
+        if: steps.compare.outputs.changed == 'true'
+        run: |
+          mv latest_source_commit.txt last_built_commit.txt
+          git config user.name "github-actions"
+          git config user.email "actions@github.com"
+          git add last_built_commit.txt
+          git commit -m "Update last built commit"
+          git push
