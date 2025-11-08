@@ -1,19 +1,22 @@
-# Dockerfile for nntp-proxy
-FROM python:3.12-slim
-
-# Install system dependencies (if needed)
-RUN apt-get update && apt-get install -y git && rm -rf /var/lib/apt/lists/*
-
-# Clone the latest version of nntp-proxy
-RUN git clone https://github.com/mjc/nntp-proxy.git /app
+# ---- Build stage ----
+FROM rust:1.85 AS builder
 
 WORKDIR /app
 
-# Install Python dependencies (if any)
-RUN pip install --no-cache-dir -r requirements.txt || true
+# Copy upstream source (cloned by GitHub Actions into source-repo/)
+COPY source-repo/ .
 
-# Expose default NNTP proxy port
-EXPOSE 119 563
+# Build release binary
+RUN cargo build --release
 
-# Default command
-CMD ["python", "nntp-proxy.py"]
+# ---- Runtime stage ----
+FROM debian:stable-slim
+
+WORKDIR /app
+
+# Copy compiled binary
+COPY --from=builder /app/target/release/nntp-proxy /usr/local/bin/nntp-proxy
+
+EXPOSE 8119
+
+CMD ["nntp-proxy"]

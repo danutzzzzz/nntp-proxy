@@ -2,15 +2,15 @@ name: Build & Update nntp-proxy Docker Image
 
 on:
   schedule:
-    - cron: "0 3 * * *"  # Runs daily at 3 AM UTC
+    - cron: "0 3 * * *"    # Daily at 3 AM UTC
   workflow_dispatch:
   push:
     branches:
       - main
 
 permissions:
-  contents: write    # ✅ REQUIRED so the workflow can push files
-  packages: write
+  contents: write          # allow git commit + push
+  packages: write          # if you ever push GHCR
 
 jobs:
   build:
@@ -19,10 +19,8 @@ jobs:
     steps:
       - name: Checkout your repo
         uses: actions/checkout@v4
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Clone source repository
+      - name: Clone upstream nntp-proxy source
         run: |
           git clone https://github.com/mjc/nntp-proxy.git source-repo
           cd source-repo
@@ -36,18 +34,12 @@ jobs:
           else
             diff="new"
           fi
-
-          if [[ -n "$diff" ]]; then
-            echo "changed=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "changed=false" >> "$GITHUB_OUTPUT"
-          fi
+          echo "changed=$([[ -n "$diff" ]] && echo true || echo false)" >> $GITHUB_OUTPUT
 
       - name: Build Docker image
         if: steps.compare.outputs.changed == 'true'
         run: |
           docker build -t danutzzzzz/nntp-proxy:latest .
-          echo "✅ Docker image built"
 
       - name: Push Docker image to Docker Hub
         if: steps.compare.outputs.changed == 'true'
@@ -59,12 +51,8 @@ jobs:
         if: steps.compare.outputs.changed == 'true'
         run: |
           mv latest_source_commit.txt last_built_commit.txt
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git config user.name "github-actions"
+          git config user.email "actions@github.com"
           git add last_built_commit.txt
-
-          # ✅ Avoid failing if nothing changed
-          git commit -m "Update last built commit" || echo "No changes to commit"
-
-          # ✅ Use GITHUB_TOKEN to push
-          git push origin HEAD:main
+          git commit -m "Update last built commit"
+          git push
