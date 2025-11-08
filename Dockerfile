@@ -1,5 +1,5 @@
 # ---- Builder Stage ----
-FROM rust:nightly-slim AS builder
+FROM rustlang/rust:nightly AS builder
 
 # Install git to clone the repo
 RUN apt-get update && apt-get install -y git && rm -rf /var/lib/apt/lists/*
