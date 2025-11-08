@@ -1,5 +1,5 @@
 # ---- Builder Stage ----
-FROM rust:nightly AS builder
+FROM rust:nightly-slim-bullseye AS builder
 
 # Set working directory
 WORKDIR /app
