@@ -23,6 +23,7 @@ WORKDIR /app
 
 COPY --from=builder /app/target/release/nntp-proxy /usr/local/bin/nntp-proxy
 COPY docker/config.yaml /etc/nntp-proxy/config.yaml
+RUN chown -R nntp-proxy:nntp-proxy /etc/nntp-proxy
 
 EXPOSE 8119 8993
 

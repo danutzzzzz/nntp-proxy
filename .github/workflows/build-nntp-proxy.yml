@@ -38,7 +38,11 @@ jobs:
       - name: Build Docker image
         if: steps.compare.outputs.changed == 'true'
         run: |
-          cp -r source-repo/* .
+          rsync -av --exclude '.git' --exclude 'Dockerfile' --exclude 'docker' source-repo/ .
+          
+      - name: Build Docker image
+        if: steps.compare.outputs.changed == 'true'
+        run: |
           docker build -t danutzzzzz/nntp-proxy:latest .
 
       - name: Push Docker image to Docker Hub
