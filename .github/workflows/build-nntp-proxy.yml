@@ -42,7 +42,7 @@ jobs:
         if: steps.compare.outputs.changed == 'true'
         run: |
           echo "${{ secrets.DOCKER_HUB_TOKEN }}" | docker login -u "${{ secrets.DOCKER_HUB_USERNAME }}" --password-stdin
-          docker push your-dockerhub-username/nntp-proxy:latest
+          docker push danutzzzzz/nntp-proxy:latest
 
       - name: Update last built commit record
         if: steps.compare.outputs.changed == 'true'
