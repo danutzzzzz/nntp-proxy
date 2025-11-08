@@ -13,7 +13,7 @@ WORKDIR /app
 RUN pip install --no-cache-dir -r requirements.txt || true
 
 # Expose default NNTP proxy port
-EXPOSE 119,563
+EXPOSE 119, 563
 
 # Default command
 CMD ["python", "nntp-proxy.py"]
