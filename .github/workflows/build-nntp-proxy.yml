@@ -2,31 +2,30 @@ name: Build & Update nntp-proxy Docker Image
 
 on:
   schedule:
-    - cron: "0 3 * * *"    # Daily at 3 AM UTC
+    - cron: "0 3 * * *"
   workflow_dispatch:
   push:
-    branches:
-      - main
+    branches: [ "main" ]
 
 permissions:
-  contents: write          # allow git commit + push
-  packages: write          # if you ever push GHCR
+  contents: write
+  packages: write
 
 jobs:
   build:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout your repo
+      - name: Checkout repo
         uses: actions/checkout@v4
 
-      - name: Clone upstream nntp-proxy source
+      - name: Clone source repository
         run: |
           git clone https://github.com/mjc/nntp-proxy.git source-repo
           cd source-repo
           git log -1 --pretty=format:"%H" > ../latest_source_commit.txt
 
-      - name: Compare last build commit
+      - name: Compare last built commit
         id: compare
         run: |
           if [ -f last_built_commit.txt ]; then
@@ -39,6 +38,7 @@ jobs:
       - name: Build Docker image
         if: steps.compare.outputs.changed == 'true'
         run: |
+          cp -r source-repo/* .
           docker build -t danutzzzzz/nntp-proxy:latest .
 
       - name: Push Docker image to Docker Hub
@@ -47,7 +47,7 @@ jobs:
           echo "${{ secrets.DOCKER_HUB_TOKEN }}" | docker login -u "${{ secrets.DOCKER_HUB_USERNAME }}" --password-stdin
           docker push danutzzzzz/nntp-proxy:latest
 
-      - name: Update last built commit record
+      - name: Update commit record
         if: steps.compare.outputs.changed == 'true'
         run: |
           mv latest_source_commit.txt last_built_commit.txt

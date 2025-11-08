@@ -1,0 +1,186 @@
+name: Upstream Sync → Build → Multi-arch Publish → Release → Notify
+
+on:
+  schedule:
+    - cron: "0 3 * * *"      # daily 03:00 UTC
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: write
+  packages: write
+  issues: write    # optional: for release notes if desired
+
+jobs:
+  build-and-publish:
+    runs-on: ubuntu-latest
+    env:
+      IMAGE_NAME: nntp-proxy
+      DOCKERHUB_REPO: ${{ secrets.DOCKER_HUB_USERNAME }}/nntp-proxy
+      GHCR_REPO: ghcr.io/${{ github.repository_owner }}/nntp-proxy
+
+    steps:
+      - name: Checkout this repo (where workflow lives)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Clone upstream nntp-proxy source
+        run: |
+          rm -rf source-repo
+          git clone https://github.com/mjc/nntp-proxy.git source-repo
+          cd source-repo
+          git rev-parse --short HEAD > ../latest_source_short_sha.txt
+          git rev-parse HEAD > ../latest_source_commit.txt
+          # detect if upstream HEAD has an exact tag
+          upstream_tag=$(git describe --tags --exact-match HEAD 2>/dev/null || true)
+          echo "$upstream_tag" > ../latest_source_tag.txt
+
+      - name: Determine if upstream changed
+        id: changed
+        run: |
+          if [ -f last_built_commit.txt ]; then
+            old=$(cat last_built_commit.txt)
+          else
+            old=""
+          fi
+          new=$(cat latest_source_commit.txt)
+          echo "old=$old" >> $GITHUB_OUTPUT
+          echo "new=$new" >> $GITHUB_OUTPUT
+          if [ "$old" != "$new" ]; then
+            echo "changed=true" >> $GITHUB_OUTPUT
+          else
+            echo "changed=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: If no change, skip remaining steps
+        if: steps.changed.outputs.changed == 'false'
+        run: |
+          echo "No upstream changes detected. Exiting."
+        # the job will still finish after this step (no early exit) — subsequent steps are gated by the if condition.
+
+      # ---- Prepare for build: copy Dockerfile into cloned source so context is clean ----
+      - name: Prepare build context (copy Dockerfile into source)
+        if: steps.changed.outputs.changed == 'true'
+        run: |
+          cp Dockerfile source-repo/Dockerfile
+          # copy any local config defaults if you want into build context (optional)
+          # cp config.toml source-repo/config.toml || true
+
+      # ---- Setup QEMU and Buildx for multi-arch ----
+      - name: Set up QEMU
+        if: steps.changed.outputs.changed == 'true'
+        uses: docker/setup-qemu-action@v2
+
+      - name: Set up Docker Buildx
+        if: steps.changed.outputs.changed == 'true'
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        if: steps.changed.outputs.changed == 'true'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Log in to Docker Hub
+        if: steps.changed.outputs.changed == 'true'
+        uses: docker/login-action@v3
+        with:
+          registry: docker.io
+          username: ${{ secrets.DOCKER_HUB_USERNAME }}
+          password: ${{ secrets.DOCKER_HUB_TOKEN }}
+
+      - name: Compute tags to publish
+        if: steps.changed.outputs.changed == 'true'
+        id: tags
+        run: |
+          sha_full=$(cat latest_source_commit.txt)
+          sha_short=$(cat latest_source_short_sha.txt)
+          upstream_tag=$(cat latest_source_tag.txt)
+          tags="latest,sha-${sha_short}"
+          # prefer including the upstream tag if present
+          if [ -n "$upstream_tag" ]; then
+            tags="${upstream_tag},${tags}"
+          fi
+          echo "sha_full=$sha_full" >> $GITHUB_OUTPUT
+          echo "sha_short=$sha_short" >> $GITHUB_OUTPUT
+          echo "upstream_tag=$upstream_tag" >> $GITHUB_OUTPUT
+          echo "tags=$tags" >> $GITHUB_OUTPUT
+
+      - name: Multi-arch build & push to GHCR and Docker Hub
+        if: steps.changed.outputs.changed == 'true'
+        uses: docker/build-push-action@v5
+        with:
+          context: ./source-repo
+          file: ./source-repo/Dockerfile
+          push: true
+          platforms: linux/amd64,linux/arm64
+          # create two image names: ghcr and docker hub — metadata-action isn't used here to keep tags explicit
+          tags: |
+            ${{ env.GHCR_REPO }}:${{ steps.tags.outputs.upstream_tag != '' && steps.tags.outputs.upstream_tag || 'latest' }}
+            ${{ env.GHCR_REPO }}:latest
+            ${{ env.GHCR_REPO }}:sha-${{ steps.tags.outputs.sha_short }}
+            ${{ env.DOCKERHUB_REPO }}:${{ steps.tags.outputs.upstream_tag != '' && steps.tags.outputs.upstream_tag || 'latest' }}
+            ${{ env.DOCKERHUB_REPO }}:latest
+            ${{ env.DOCKERHUB_REPO }}:sha-${{ steps.tags.outputs.sha_short }}
+
+      - name: Create GitHub Release (tagged if upstream tag exists, otherwise create by sha)
+        if: steps.changed.outputs.changed == 'true'
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ steps.tags.outputs.upstream_tag != '' && steps.tags.outputs.upstream_tag || format('upstream-{0}', steps.tags.outputs.sha_short) }}
+          name: ${{ steps.tags.outputs.upstream_tag != '' && steps.tags.outputs.upstream_tag || format('Upstream commit {0}', steps.tags.outputs.sha_short) }}
+          body: |
+            Automated release created by workflow.
+            Upstream commit: ${{ steps.tags.outputs.sha_full }}
+            Upstream tag: ${{ steps.tags.outputs.upstream_tag }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Update last_built_commit.txt and README with image info
+        if: steps.changed.outputs.changed == 'true'
+        run: |
+          sha_full=$(cat latest_source_commit.txt)
+          sha_short=$(cat latest_source_short_sha.txt)
+          upstream_tag=$(cat latest_source_tag.txt)
+          echo "$sha_full" > last_built_commit.txt
+
+          # Insert or update a single-line badge / image line in README.md
+          IMG_GHCR="${{ env.GHCR_REPO }}:${upstream_tag:-latest}"
+          IMG_DOCKERHUB="${{ env.DOCKERHUB_REPO }}:${upstream_tag:-latest}"
+          # if README already has Docker image line beginning with "Docker image:", replace it, else append
+          if grep -qE '^Docker image:' README.md 2>/dev/null; then
+            sed -i "s|^Docker image:.*|Docker image: GHCR: ${IMG_GHCR} |" README.md
+          else
+            printf "\nDocker image: GHCR: %s\n" "${IMG_GHCR}" >> README.md
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add last_built_commit.txt README.md || true
+          git commit -m "ci: update last_built_commit and README with built image info (upstream: ${sha_short})" || echo "No changes to commit"
+          # push using GITHUB_TOKEN
+          git push origin HEAD:main
+
+      - name: Notify Slack (optional)
+        if: steps.changed.outputs.changed == 'true' && secrets.SLACK_WEBHOOK != ''
+        run: |
+          sha_short=$(cat latest_source_short_sha.txt)
+          upstream_tag=$(cat latest_source_tag.txt)
+          message="nntp-proxy: built and published images for upstream ${upstream_tag:-$sha_short}\nGHCR: ${{ env.GHCR_REPO }}:sha-${sha_short}\nDockerHub: ${{ env.DOCKERHUB_REPO }}:sha-${sha_short}"
+          payload=$(jq -n --arg t "$message" '{"text":$t}')
+          curl -sS -X POST -H 'Content-type: application/json' --data "$payload" "${{ secrets.SLACK_WEBHOOK }}"
+
+      - name: Notify Discord (optional)
+        if: steps.changed.outputs.changed == 'true' && secrets.DISCORD_WEBHOOK != ''
+        run: |
+          sha_short=$(cat latest_source_short_sha.txt)
+          upstream_tag=$(cat latest_source_tag.txt)
+          content="nntp-proxy: built and published images for upstream ${upstream_tag:-$sha_short}\nGHCR: ${{ env.GHCR_REPO }}:sha-${sha_short}\nDockerHub: ${{ env.DOCKERHUB_REPO }}:sha-${sha_short}"
+          jq -n --arg c "$content" '{"content":$c}' > /tmp/discord.json
+          curl -sS -H "Content-Type: application/json" -d @/tmp/discord.json "${{ secrets.DISCORD_WEBHOOK }}"

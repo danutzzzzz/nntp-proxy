@@ -1,22 +1,29 @@
-# ---- Build stage ----
-FROM rust:1.85 AS builder
+# ---- Builder Stage ----
+FROM rustlang/rust:nightly AS builder
 
 WORKDIR /app
 
-# Copy upstream source (cloned by GitHub Actions into source-repo/)
-COPY source-repo/ .
+COPY Cargo.toml Cargo.lock ./
 
-# Build release binary
+RUN mkdir -p src && echo "fn main() {}" > src/main.rs
+RUN cargo build --release || true
+
+COPY . .
+
 RUN cargo build --release
 
-# ---- Runtime stage ----
-FROM debian:stable-slim
+# ---- Runtime Stage ----
+FROM debian:bookworm-slim
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates && \
+    rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
-# Copy compiled binary
 COPY --from=builder /app/target/release/nntp-proxy /usr/local/bin/nntp-proxy
+COPY docker/config.yaml /etc/nntp-proxy/config.yaml
 
-EXPOSE 8119
+EXPOSE 8119 8993
 
-CMD ["nntp-proxy"]
+ENTRYPOINT ["/usr/local/bin/nntp-proxy"]

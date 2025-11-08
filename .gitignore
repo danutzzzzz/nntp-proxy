@@ -1,0 +1,4 @@
+source-repo/
+target/
+latest_source_commit.txt
+last_built_commit.txt
