@@ -1,30 +1,41 @@
 # ---- Builder Stage ----
-FROM rustlang/rust:nightly AS builder
+FROM rust:1.80-slim AS builder
 
+# Set working directory
 WORKDIR /app
 
+# Copy Cargo files
 COPY Cargo.toml Cargo.lock ./
 
-RUN mkdir -p src && echo "fn main() {}" > src/main.rs
-RUN cargo build --release || true
+# Copy source code
+COPY src/ src/
 
-COPY . .
-
+# Build release binary
 RUN cargo build --release
 
 # ---- Runtime Stage ----
 FROM debian:bookworm-slim
 
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    ca-certificates && \
-    rm -rf /var/lib/apt/lists/*
+# Create non-root user
+RUN useradd --create-home --shell /bin/bash nntp-proxy
 
-WORKDIR /app
+# Create config directory
+RUN mkdir -p /etc/nntp-proxy
 
+# Copy binary from builder
 COPY --from=builder /app/target/release/nntp-proxy /usr/local/bin/nntp-proxy
+
+# Copy config file
 COPY docker/config.yaml /etc/nntp-proxy/config.yaml
+
+# Fix ownership
 RUN chown -R nntp-proxy:nntp-proxy /etc/nntp-proxy
 
+# Expose ports
 EXPOSE 8119 8993
 
-ENTRYPOINT ["/usr/local/bin/nntp-proxy"]
+# Run as non-root
+USER nntp-proxy
+
+# Default command
+CMD ["/usr/local/bin/nntp-proxy", "--config", "/etc/nntp-proxy/config.yaml"]
